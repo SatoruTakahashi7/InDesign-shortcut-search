@@ -2,6 +2,8 @@
 
 `ショートカット検索.jsx`だけで動作する単体版です。
 
+GitHub: [SatoruTakahashi7/InDesign-shortcut-search](https://github.com/SatoruTakahashi7/InDesign-shortcut-search)
+
 ## インストール
 
 1. InDesignで「ウィンドウ → ユーティリティ → スクリプト」を開きます。
@@ -36,6 +38,6 @@ ScriptUIパレットのため、InDesignのパネル領域へのドッキング�
 - Planning / testing / direction: GYAHTEI Design Laboratory @gyahtei_satoru
 - Development support: Codex
 
-## Meta URL
+## Repository
 
-リポジトリURLが確定するまでは、スクリプトヘッダーの`Meta-URL`を`〓`としています。公開先が決まったら、そのURLへ置き換えてください。
+[SatoruTakahashi7/InDesign-shortcut-search](https://github.com/SatoruTakahashi7/InDesign-shortcut-search)
