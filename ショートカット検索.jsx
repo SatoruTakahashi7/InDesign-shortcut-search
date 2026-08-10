@@ -1,7 +1,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=com.satorutakahashi.indesign.shortcut-search.jsx
-Version=1.0.3
+Version=1.0.10
 Meta-URL=https://github.com/SatoruTakahashi7/InDesign-shortcut-search
 Target-App=indesign
 Name=ショートカット検索
@@ -14,8 +14,8 @@ Description-END
 SCRIPTMETA-END
 
     ショートカット検索 JSX版
-    Version: 1.0.3
-    Updated: 2026-08-04
+    Version: 1.0.10
+    Updated: 2026-08-09
 
     Credits:
     - Planning / testing / direction: GYAHTEI Design Laboratory @gyahtei_satoru
@@ -113,6 +113,31 @@ function gyahteiEncodeXml(value) {
         .replace(/>/g, "&gt;")
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&apos;");
+}
+
+function gyahteiCanonicalShortcut(value) {
+    var source = String(value || "").replace(/^\s+|\s+$/g, "");
+    var parts = source.split("+");
+    var modifiers = {Ctrl: false, Opt: false, Shift: false, Cmd: false};
+    var keys = [];
+    var i;
+    for (i = 0; i < parts.length; i++) {
+        var part = String(parts[i] || "").replace(/^\s+|\s+$/g, "");
+        var lower = part.toLowerCase();
+        if (!part) { continue; }
+        if (lower === "ctrl" || lower === "control") { modifiers.Ctrl = true; }
+        else if (lower === "opt" || lower === "option" || lower === "alt") { modifiers.Opt = true; }
+        else if (lower === "shift") { modifiers.Shift = true; }
+        else if (lower === "cmd" || lower === "command" || lower === "meta") { modifiers.Cmd = true; }
+        else { keys.push(part); }
+    }
+    if (source === "+" || /\+\+$/.test(source)) { keys.push("+"); }
+    var result = [];
+    if (modifiers.Ctrl) { result.push("Ctrl"); }
+    if (modifiers.Opt) { result.push("Opt"); }
+    if (modifiers.Shift) { result.push("Shift"); }
+    if (modifiers.Cmd) { result.push("Cmd"); }
+    return result.concat(keys).join("+");
 }
 
 function gyahteiParseActionExpression(expression) {
@@ -247,8 +272,16 @@ function gyahteiGetUserShortcutFolder(createIfMissing) {
         return null;
     }
     var versionPrefix = "Version " + major + ".0";
+    var versionPattern = new RegExp("^Version " + major + "\\.0(?:-[A-Za-z])?$");
     var versions = root.getFiles(function (entry) {
-        return entry instanceof Folder && decodeURI(entry.name).indexOf(versionPrefix) === 0;
+        return entry instanceof Folder && versionPattern.test(decodeURI(entry.name));
+    });
+    versions.sort(function (a, b) {
+        var aName = decodeURI(a.name);
+        var bName = decodeURI(b.name);
+        if (aName === versionPrefix) { return -1; }
+        if (bName === versionPrefix) { return 1; }
+        return aName < bName ? -1 : 1;
     });
     var i;
     for (i = 0; i < versions.length; i++) {
@@ -373,16 +406,23 @@ function gyahteiResolveMenuAction(candidates) {
                 var signedId = Number(action.id);
                 if (resolvedName && !isNaN(signedId)) {
                     var unsignedId = signedId < 0 ? signedId + 4294967296 : signedId;
+                    var resolvedExpression = "0x" + unsignedId.toString(16).toUpperCase();
                     var area = "";
                     try { area = String(action.area || ""); } catch (areaError) {}
+                    var resolvedInternalName = "";
+                    if (unsignedId >= 4278190080) {
+                        resolvedExpression = "0xff000000 + " + (unsignedId - 4278190080);
+                        resolvedInternalName = "スクリプト:" +
+                            gyahteiNormalizeScriptPathName(resolvedName);
+                    }
                     return gyahteiJson({
                         ok: true,
                         actionId: signedId,
                         actionIdUnsigned: unsignedId,
-                        actionIdExpression: "0x" + unsignedId.toString(16).toUpperCase(),
+                        actionIdExpression: resolvedExpression,
                         name: resolvedName,
                         area: area,
-                        internalName: ""
+                        internalName: resolvedInternalName
                     });
                 }
             } catch (resolveError) {}
@@ -393,6 +433,92 @@ function gyahteiResolveMenuAction(candidates) {
     }
 }
 
+function gyahteiNormalizeScriptPathName(value) {
+    var result = String(value || "")
+        .replace(/^\s+|\s+$/g, "")
+        .replace(/^スクリプト:/, "")
+        .replace(/\s*:\s*/g, ":")
+        .replace(/(^|:)Scripts Panel(?=:|$)/ig, "$1")
+        .replace(/:{2,}/g, ":")
+        .replace(/^:+|:+$/g, "");
+    return result.replace(/^User:/i, "ユーザー:")
+        .replace(/^Application:/i, "アプリケーション:");
+}
+
+function gyahteiScriptPathLabel(labels, file) {
+    var parts = [];
+    var i;
+    for (i = 0; i < labels.length; i++) {
+        var label = String(labels[i] || "").replace(/^\s+|\s+$/g, "");
+        if (/^Scripts Panel$/i.test(label)) { continue; }
+        if (label) { parts.push(label); }
+    }
+    var fileName = file ? decodeURI(file.name) : "";
+    var lastPart = parts.length ? parts[parts.length - 1] : "";
+    var labelAlreadyHasFile = lastPart === fileName ||
+        lastPart.slice(-(fileName.length + 1)) === ":" + fileName ||
+        lastPart.slice(-(fileName.length + 1)) === "/" + fileName;
+    if (fileName && !labelAlreadyHasFile) {
+        parts.push(fileName);
+    }
+    var joined = gyahteiNormalizeScriptPathName(parts.join(":"));
+    if (!/^(ユーザー|アプリケーション):/.test(joined)) {
+        var applicationPath = "";
+        try { applicationPath = String(app.filePath.fsName || "").toLowerCase(); } catch (ignoreAppPath) {}
+        var scriptPath = file ? String(file.fsName || "").toLowerCase() : "";
+        joined = (applicationPath && scriptPath.indexOf(applicationPath) === 0
+            ? "アプリケーション:" : "ユーザー:") + joined;
+    }
+    return joined;
+}
+
+function gyahteiCollectCurrentScripts(node, labels, result, seen) {
+    var i;
+    if (node instanceof File) {
+        var displayName = gyahteiScriptPathLabel(labels, node);
+        if (!seen[displayName]) {
+            seen[displayName] = true;
+            result.push({
+                name: displayName,
+                area: "スクリプト",
+                shortcutText: "[定義なし]",
+                defined: false,
+                actionId: null,
+                actionIdExpression: "",
+                internalName: "スクリプト:" + displayName,
+                aliases: [
+                    displayName,
+                    decodeURI(node.name),
+                    "ユーザー:" + decodeURI(node.name),
+                    "アプリケーション:" + decodeURI(node.name),
+                    "スクリプト:" + displayName
+                ],
+                executable: false,
+                source: "現在のスクリプト一覧"
+            });
+        }
+        return;
+    }
+    if (!(node instanceof Array)) { return; }
+    if (node.length === 2 && typeof node[0] === "string") {
+        gyahteiCollectCurrentScripts(node[1], labels.concat([node[0]]), result, seen);
+        return;
+    }
+    for (i = 0; i < node.length; i++) {
+        gyahteiCollectCurrentScripts(node[i], labels, result, seen);
+    }
+}
+
+function gyahteiListCurrentScripts() {
+    try {
+        var result = [];
+        gyahteiCollectCurrentScripts(app.scriptPreferences.scriptsList, [], result, {});
+        return gyahteiJson({ok: true, scripts: result});
+    } catch (error) {
+        return gyahteiJson({ok: false, scripts: [], message: error.message});
+    }
+}
+
 function gyahteiShortcutBlock(expression, internalName, context, shortcut) {
     var nameAttribute = internalName ? " name=\"" + gyahteiEncodeXml(internalName) + "\"" : "";
     return "\t<shortcut>\n" +
@@ -400,6 +526,28 @@ function gyahteiShortcutBlock(expression, internalName, context, shortcut) {
         "\t\t<context>" + gyahteiEncodeXml(context) + "</context>\n" +
         "\t\t<string>" + gyahteiEncodeXml(shortcut) + "</string>\n" +
         "\t</shortcut>\n";
+}
+
+function gyahteiRecordMatchesAction(record, targetIdInfo, internalName) {
+    var recordIdInfo = gyahteiParseActionExpression(record.actionIdExpression);
+    if (recordIdInfo && targetIdInfo &&
+            recordIdInfo.unsignedValue === targetIdInfo.unsignedValue) {
+        return true;
+    }
+    if (!internalName || !record.internalName) { return false; }
+    if (/^スクリプト:/.test(internalName) && /^スクリプト:/.test(record.internalName)) {
+        return gyahteiNormalizeScriptPathName(record.internalName) ===
+            gyahteiNormalizeScriptPathName(internalName);
+    }
+    return record.internalName === internalName;
+}
+
+function gyahteiApplyShortcutSetFresh(setName) {
+    try {
+        /* 同名セットの上書き後も再読込されるよう、一度デフォルトへ切り替える。 */
+        app.applyShortcutSet();
+    } catch (ignoreDefaultSet) {}
+    app.applyShortcutSet(setName);
 }
 
 function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName, context, shortcut, allowOverwrite) {
@@ -414,6 +562,7 @@ function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName
         if (!gyahteiParseActionExpression(expression)) {
             return gyahteiJson({ok: false, message: "このコマンドのaction-idは編集できません"});
         }
+        shortcut = gyahteiCanonicalShortcut(shortcut);
         if (!shortcut) {
             return gyahteiJson({ok: false, message: "ショートカットを入力してください"});
         }
@@ -422,10 +571,11 @@ function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName
             return gyahteiJson({ok: false, message: "元のセットが見つかりません"});
         }
         var targetFolder = gyahteiGetUserShortcutFolder(true);
-        if (!targetFolder) {
+        if (!targetFolder && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "ユーザー用ショートカットフォルダーを特定できません"});
         }
-        var target = new File(targetFolder.fsName + "/" + newSetName + ".indk");
+        /* ユーザーセットの上書きでは、探索し直した別フォルダーではなく読込元そのものを更新する。 */
+        var target = allowOverwrite ? source : new File(targetFolder.fsName + "/" + newSetName + ".indk");
         if (target.exists && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "同名のセットが既にあります。別の名前を指定してください"});
         }
@@ -444,10 +594,9 @@ function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName
                 continue;
             }
             var record = blockRecords[0];
-            var recordIdInfo = gyahteiParseActionExpression(record.actionIdExpression);
-            var sameAction = Boolean(recordIdInfo && targetIdInfo &&
-                recordIdInfo.unsignedValue === targetIdInfo.unsignedValue);
-            var sameShortcutContext = record.shortcut === shortcut && record.context === context;
+            var sameAction = gyahteiRecordMatchesAction(record, targetIdInfo, internalName);
+            var sameShortcutContext = gyahteiCanonicalShortcut(record.shortcut) === shortcut &&
+                record.context === context;
             var sameExactAssignment = sameAction && sameShortcutContext;
             if (sameShortcutContext && !sameAction) {
                 conflictNames.push(record.internalName || record.actionIdExpression);
@@ -469,7 +618,7 @@ function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName
         var applied = false;
         var applyMessage = "";
         try {
-            app.applyShortcutSet(newSetName);
+            gyahteiApplyShortcutSetFresh(newSetName);
             applied = true;
         } catch (applyError) {
             applyMessage = "保存しましたが自動適用できませんでした。キーボードショートカット画面で選択してください: " + applyError.message;
@@ -489,7 +638,7 @@ function gyahteiSaveShortcutSet(sourcePath, newSetName, expression, internalName
     }
 }
 
-function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, context, shortcut, allowOverwrite) {
+function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, internalName, context, shortcut, allowOverwrite) {
     try {
         newSetName = String(newSetName || "").replace(/^\s+|\s+$/g, "");
         if (!newSetName) {
@@ -498,6 +647,7 @@ function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, con
         if (/[\\\/:*?\"<>|]/.test(newSetName)) {
             return gyahteiJson({ok: false, message: "セット名に使用できない文字が含まれています"});
         }
+        shortcut = gyahteiCanonicalShortcut(shortcut);
         var targetIdInfo = gyahteiParseActionExpression(expression);
         if (!targetIdInfo) {
             return gyahteiJson({ok: false, message: "このコマンドのaction-idは編集できません"});
@@ -507,10 +657,11 @@ function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, con
             return gyahteiJson({ok: false, message: "元のセットが見つかりません"});
         }
         var targetFolder = gyahteiGetUserShortcutFolder(true);
-        if (!targetFolder) {
+        if (!targetFolder && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "ユーザー用ショートカットフォルダーを特定できません"});
         }
-        var target = new File(targetFolder.fsName + "/" + newSetName + ".indk");
+        /* ユーザーセットの削除も、選択中の実ファイルを直接更新する。 */
+        var target = allowOverwrite ? source : new File(targetFolder.fsName + "/" + newSetName + ".indk");
         if (target.exists && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "同名のセットが既にあります。別の名前を指定してください"});
         }
@@ -528,10 +679,9 @@ function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, con
                 continue;
             }
             var record = blockRecords[0];
-            var recordIdInfo = gyahteiParseActionExpression(record.actionIdExpression);
-            var sameAction = Boolean(recordIdInfo &&
-                recordIdInfo.unsignedValue === targetIdInfo.unsignedValue);
-            var isTarget = sameAction && record.context === context && record.shortcut === shortcut;
+            var sameAction = gyahteiRecordMatchesAction(record, targetIdInfo, internalName);
+            var isTarget = sameAction && record.context === context &&
+                gyahteiCanonicalShortcut(record.shortcut) === shortcut;
             if (isTarget) {
                 removedCount++;
             } else {
@@ -551,7 +701,7 @@ function gyahteiDeleteShortcutAssignment(sourcePath, newSetName, expression, con
         var applied = false;
         var applyMessage = "";
         try {
-            app.applyShortcutSet(newSetName);
+            gyahteiApplyShortcutSetFresh(newSetName);
             applied = true;
         } catch (applyError) {
             applyMessage = "保存しましたが自動適用できませんでした。キーボードショートカット画面で選択してください: " + applyError.message;
@@ -2697,11 +2847,12 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"テキストスタイルの適用","area":"テキストと表","shortcutText":"デフォルト: Cmd+Num 0, デフォルト: Shift+Num 0, デフォルト: Shift+Cmd+Num 0, デフォルト: Opt+Num 0, デフォルト: Opt+Cmd+Num 0, デフォルト: Opt+Shift+Num 0, デフォルト: Opt+Shift+Cmd+Num 0, デフォルト: Cmd+Num 1, デフォルト: Shift+Num 1, デフォルト: Shift+Cmd+Num 1, デフォルト: Opt+Num 1, デフォルト: Opt+Cmd+Num 1, デフォルト: Opt+Shift+Num 1, デフォルト: Opt+Shift+Cmd+Num 1, デフォルト: Cmd+Num 2, デフォルト: Shift+Num 2, デフォルト: Shift+Cmd+Num 2, デフォルト: Opt+Num 2, デフォルト: Opt+Cmd+Num 2, デフォルト: Opt+Shift+Num 2, デフォルト: Opt+Shift+Cmd+Num 2, デフォルト: Cmd+Num 3, デフォルト: Shift+Num 3, デフォルト: Shift+Cmd+Num 3, デフォルト: Opt+Num 3, デフォルト: Opt+Cmd+Num 3, デフォルト: Opt+Shift+Num 3, デフォルト: Opt+Shift+Cmd+Num 3, デフォルト: Cmd+Num 4, デフォルト: Shift+Num 4, デフォルト: Shift+Cmd+Num 4, デフォルト: Opt+Num 4, デフォルト: Opt+Cmd+Num 4, デフォルト: Opt+Shift+Num 4, デフォルト: Opt+Shift+Cmd+Num 4, デフォルト: Cmd+Num 5, デフォルト: Shift+Num 5, デフォルト: Shift+Cmd+Num 5, デフォルト: Opt+Num 5, デフォルト: Opt+Cmd+Num 5, デフォルト: Opt+Shift+Num 5, デフォルト: Opt+Shift+Cmd+Num 5, デフォルト: Cmd+Num 6, デフォルト: Shift+Num 6, デフォルト: Shift+Cmd+Num 6, デフォルト: Opt+Num 6, デフォルト: Opt+Cmd+Num 6, デフォルト: Opt+Shift+Num 6, デフォルト: Opt+Shift+Cmd+Num 6, デフォルト: Cmd+Num 7, デフォルト: Shift+Num 7, デフォルト: Shift+Cmd+Num 7, デフォルト: Opt+Num 7, デフォルト: Opt+Cmd+Num 7, デフォルト: Opt+Shift+Num 7, デフォルト: Opt+Shift+Cmd+Num 7, デフォルト: Cmd+Num 8, デフォルト: Shift+Num 8, デフォルト: Shift+Cmd+Num 8, デフォルト: Opt+Num 8, デフォルト: Opt+Cmd+Num 8, デフォルト: Opt+Shift+Num 8, デフォルト: Opt+Shift+Cmd+Num 8, デフォルト: Cmd+Num 9, デフォルト: Shift+Num 9, デフォルト: Shift+Cmd+Num 9, デフォルト: Opt+Num 9, デフォルト: Opt+Cmd+Num 9, デフォルト: Opt+Shift+Num 9, デフォルト: Opt+Shift+Cmd+Num 9","defined":true,"actionId":119628,"actionIdExpression":"0x1d300 + 76","internalName":"KBSCE Text and Tables:Apply text style","aliases":["テキストスタイルの適用","KBSCE Text and Tables:Apply text style"],"executable":true,"source":"GYAHTEI.indk/runtime","id":2013}];
 
 (function () {
-    var SS_VERSION = "1.0.3";
+    var SS_VERSION = "1.0.10";
     var MAX_RESULTS = 300;
     var commands = [];
     var selectedCommand = null;
     var currentSet = null;
+    var currentScriptCatalog = [];
 
     var contextLabels = {
         DefaultContext: "デフォルト",
@@ -2820,7 +2971,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 result.push(part.length === 1 ? part.toUpperCase() : part);
             }
         }
-        return result.join("+");
+        return gyahteiCanonicalShortcut(result.join("+"));
     }
 
     function copyCommand(source) {
@@ -2845,20 +2996,49 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 
     function rebuildCommands(records) {
         var byActionId = {};
+        var byInternalName = {};
+        var byCommandName = {};
         var i;
         var command;
         commands = [];
         for (i = 0; i < SHORTCUT_SEARCH_COMMANDS.length; i++) {
+            /* スクリプト項目は古い固定一覧を使わず、現在のScriptsパネルから作る。 */
+            if (SHORTCUT_SEARCH_COMMANDS[i].area === "スクリプト") { continue; }
             command = copyCommand(SHORTCUT_SEARCH_COMMANDS[i]);
             commands.push(command);
             if (command.actionId !== null && command.actionId !== undefined) {
                 byActionId[actionIdKey(command.actionId)] = command;
             }
+            byCommandName[normalize(command.name)] = command;
+            if (command.internalName) { byInternalName[command.internalName] = command; }
+        }
+        for (i = 0; i < currentScriptCatalog.length; i++) {
+            var liveScript = currentScriptCatalog[i];
+            command = byCommandName[normalize(liveScript.name)];
+            if (!command) {
+                command = copyCommand(liveScript);
+                commands.push(command);
+                byCommandName[normalize(command.name)] = command;
+            }
+            if (!command.internalName) { command.internalName = liveScript.internalName; }
+            if (command.internalName) { byInternalName[command.internalName] = command; }
+            var liveAliases = liveScript.aliases || [];
+            var lai;
+            for (lai = 0; lai < liveAliases.length; lai++) {
+                byCommandName[normalize(String(liveAliases[lai]).replace(/^スクリプト:/, ""))] = command;
+            }
         }
         for (i = 0; i < records.length; i++) {
             var record = records[i];
             var idKey = record.actionId === null ? "" : actionIdKey(record.actionId);
-            command = idKey ? byActionId[idKey] : null;
+            var scriptRecordName = String(record.internalName || "").replace(/^スクリプト:/, "");
+            if (/^スクリプト:/.test(record.internalName)) {
+                command = byInternalName[record.internalName] ||
+                    byCommandName[normalize(scriptRecordName)] ||
+                    (idKey ? byActionId[idKey] : null);
+            } else {
+                command = idKey ? byActionId[idKey] : null;
+            }
             if (!command) {
                 command = {
                     id: "live-" + i,
@@ -2874,6 +3054,8 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 };
                 commands.push(command);
                 if (idKey) { byActionId[idKey] = command; }
+                if (record.internalName) { byInternalName[record.internalName] = command; }
+                byCommandName[normalize(command.name)] = command;
             }
             if (!command.actionIdExpression) { command.actionIdExpression = record.actionIdExpression; }
             if (!command.internalName) { command.internalName = record.internalName; }
@@ -2883,7 +3065,12 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             if (record.area && command.source === "現在の.indk") {
                 command.area = standardFeatureArea(record.area, command.area);
             }
-            command.assignments.push({context: record.context, shortcut: record.shortcut});
+            command.assignments.push({
+                context: record.context,
+                shortcut: record.shortcut,
+                actionIdExpression: record.actionIdExpression,
+                internalName: record.internalName
+            });
         }
         for (i = 0; i < commands.length; i++) {
             command = commands[i];
@@ -2912,6 +3099,18 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         return candidates;
     }
 
+    function fullScriptInternalName(command, resolvedName) {
+        var commandName = gyahteiNormalizeScriptPathName(command && command.name || "");
+        if (/^(ユーザー|アプリケーション):/.test(commandName)) {
+            return "スクリプト:" + commandName;
+        }
+        var existing = gyahteiNormalizeScriptPathName(command && command.internalName || "");
+        if (/^(ユーザー|アプリケーション):/.test(existing)) {
+            return "スクリプト:" + existing;
+        }
+        return "スクリプト:" + gyahteiNormalizeScriptPathName(resolvedName || commandName);
+    }
+
     function findShortcutUses(shortcut) {
         var uses = [];
         var i;
@@ -2919,7 +3118,8 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         for (i = 0; i < commands.length; i++) {
             if (commands[i] === selectedCommand) { continue; }
             for (j = 0; j < commands[i].assignments.length; j++) {
-                if (commands[i].assignments[j].shortcut === shortcut) {
+                if (gyahteiCanonicalShortcut(commands[i].assignments[j].shortcut) ===
+                        gyahteiCanonicalShortcut(shortcut)) {
                     uses.push({command: commands[i], context: commands[i].assignments[j].context});
                 }
             }
@@ -3065,9 +3265,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         }
         contextDropdown.selection = 0;
         contextDropdown.minimumSize.width = 145;
+        contextDropdown.helpTip = "ショートカットが有効になる適用範囲です。通常は「デフォルト」を使用します";
         var captureDisplay = assignGroup.add("edittext", undefined, "", {readonly: true});
         captureDisplay.alignment = ["fill", "center"];
-        captureDisplay.helpTip = "右のボタンを押してキーを記録";
+        captureDisplay.helpTip = "ここをクリックしてキーを記録";
         var captureButton = assignGroup.add("button", undefined, "キーを記録…");
 
         var manualInput = editorGroup.add("edittext", undefined, "");
@@ -3121,6 +3322,29 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             invokeButton.enabled = false;
             saveButton.enabled = false;
             deleteButton.enabled = false;
+        }
+
+        function commandSelectionKey(command) {
+            if (!command) { return ""; }
+            if (command.internalName) { return "internal:" + normalize(command.internalName); }
+            if (command.actionId !== null && command.actionId !== undefined) {
+                return "action:" + actionIdKey(command.actionId);
+            }
+            return "name:" + normalize(command.name);
+        }
+
+        function restoreCommandSelection(selectionKey) {
+            if (!selectionKey) { return false; }
+            var i;
+            for (i = 0; i < resultList.items.length; i++) {
+                var item = resultList.items[i];
+                if (item._command && commandSelectionKey(item._command) === selectionKey) {
+                    resultList.selection = item;
+                    showSelectedCommand(item._command);
+                    return true;
+                }
+            }
+            return false;
         }
 
         function render() {
@@ -3228,7 +3452,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             detailName.text = command.name;
             detailShortcut.text = command.shortcutText;
             detailArea.text = "機能エリア: " + command.area;
-            detailAction.text = "action-id: " + (command.actionIdExpression || "未調査");
+            detailAction.text = command.area === "スクリプト"
+                ? "内部識別番号: " + (command.actionIdExpression || "選択時に自動取得")
+                : "action-id: " + (command.actionIdExpression || "未調査");
             invokeButton.enabled = Boolean(command.executable);
             captureDisplay.text = "";
             captureDisplay._raw = "";
@@ -3243,10 +3469,14 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 if (resolved.ok) {
                     command.actionId = resolved.actionId;
                     command.actionIdExpression = resolved.actionIdExpression;
-                    command.internalName = resolved.internalName || "";
+                    command.internalName = command.area === "スクリプト"
+                        ? fullScriptInternalName(command, resolved.name)
+                        : (resolved.internalName || "");
                     command.executable = resolved.actionIdUnsigned < 4278190080;
                     detailArea.text = "機能エリア: " + command.area;
-                    detailAction.text = "action-id: " + resolved.actionIdExpression;
+                    detailAction.text = command.area === "スクリプト"
+                        ? "内部識別番号: " + resolved.actionIdExpression + "（自動）"
+                        : "action-id: " + resolved.actionIdExpression;
                     invokeButton.enabled = command.executable;
                 }
             }
@@ -3275,7 +3505,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             return item;
         }
 
-        function loadSet(set) {
+        function loadSet(set, selectionKey) {
             if (!set || !set.path) { return; }
             setStatus("ショートカットセットを読込中…");
             var result = parseResult(gyahteiReadShortcutSet(set.path));
@@ -3287,11 +3517,18 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             currentSet = {name: result.name, path: result.path, kind: result.kind};
             rebuildCommands(result.records || []);
             render();
+            restoreCommandSelection(selectionKey);
             reloadButton.enabled = true;
             setStatus(result.name + " を読み込みました");
         }
 
-        function listSets(preferredPath) {
+        function refreshCurrentScriptCatalog() {
+            var result = parseResult(gyahteiListCurrentScripts());
+            currentScriptCatalog = result.ok ? (result.scripts || []) : [];
+            return result;
+        }
+
+        function listSets(preferredPath, selectionKey) {
             var result = parseResult(gyahteiListShortcutSets());
             setDropdown.removeAll();
             if (!result.ok) {
@@ -3306,7 +3543,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             }
             if (selectedItem) { setDropdown.selection = selectedItem; }
             else if (setDropdown.items.length) { setDropdown.selection = 0; }
-            if (setDropdown.selection) { loadSet(setDropdown.selection._set); }
+            if (setDropdown.selection) { loadSet(setDropdown.selection._set, selectionKey); }
         }
 
         resultList.onChange = function () {
@@ -3323,7 +3560,11 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 loadSet(setDropdown.selection._set);
             }
         };
-        reloadButton.onClick = function () { if (currentSet) { loadSet(currentSet); } };
+        reloadButton.onClick = function () {
+            var selectionKey = commandSelectionKey(selectedCommand);
+            refreshCurrentScriptCatalog();
+            if (currentSet) { loadSet(currentSet, selectionKey); }
+        };
         chooseButton.onClick = function () {
             var result = parseResult(gyahteiChooseShortcutSet());
             if (!result.ok) {
@@ -3334,18 +3575,30 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             setDropdown.selection = item;
             loadSet(result.set);
         };
-        captureButton.onClick = function () {
-            if (!selectedCommand) { return; }
-            var result = parseResult(gyahteiCaptureShortcut());
-            if (!result.ok) {
-                if (!result.canceled) { alert(result.message, "ショートカット検索"); }
-                return;
+        var captureDialogOpening = false;
+        function captureShortcutIntoDisplay() {
+            if (!selectedCommand || captureDialogOpening) { return; }
+            captureDialogOpening = true;
+            try {
+                var result = parseResult(gyahteiCaptureShortcut());
+                if (!result.ok) {
+                    if (!result.canceled) { alert(result.message, "ショートカット検索"); }
+                    return;
+                }
+                captureDisplay._raw = result.shortcut;
+                captureDisplay.text = displayShortcut(result.shortcut);
+                manualInput.text = "";
+                updateConflictDisplay();
+            } finally {
+                captureDialogOpening = false;
             }
-            captureDisplay._raw = result.shortcut;
-            captureDisplay.text = displayShortcut(result.shortcut);
-            manualInput.text = "";
-            updateConflictDisplay();
-        };
+        }
+        captureButton.onClick = captureShortcutIntoDisplay;
+        captureDisplay.addEventListener("mousedown", function (event) {
+            try { event.preventDefault(); } catch (ignorePrevent) {}
+            try { event.stopPropagation(); } catch (ignoreStop) {}
+            captureShortcutIntoDisplay();
+        }, true);
         manualInput.onChanging = function () {
             captureDisplay._raw = "";
             captureDisplay.text = "";
@@ -3360,6 +3613,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         };
         saveButton.onClick = function () {
             if (!selectedCommand || !currentSet) { return; }
+            if (selectedCommand.area === "スクリプト") {
+                selectedCommand.internalName = fullScriptInternalName(selectedCommand, "");
+            }
+            var selectionKey = commandSelectionKey(selectedCommand);
             var raw = currentRawShortcut();
             if (!raw) { return; }
             var context = contextDropdown.selection._value;
@@ -3386,11 +3643,12 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 setStatus(result.message || "保存失敗");
                 return;
             }
-            listSets(result.path);
+            listSets(result.path, selectionKey);
             setStatus(result.message);
         };
         deleteButton.onClick = function () {
             if (!selectedCommand || !currentSet || !currentDropdown.selection) { return; }
+            var selectionKey = commandSelectionKey(selectedCommand);
             var assignment = currentDropdown.selection._assignment;
             var overwrite = currentSet.kind === "ユーザー" || currentSet.kind === "パネル編集";
             var newSetName = overwrite ? currentSet.name : trim(setNameInput.text);
@@ -3404,7 +3662,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 return;
             }
             var result = parseResult(gyahteiDeleteShortcutAssignment(
-                currentSet.path, newSetName, selectedCommand.actionIdExpression,
+                currentSet.path, newSetName,
+                assignment.actionIdExpression || selectedCommand.actionIdExpression,
+                assignment.internalName || selectedCommand.internalName,
                 assignment.context, assignment.shortcut, overwrite
             ));
             if (!result.ok) {
@@ -3412,7 +3672,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 setStatus(result.message || "削除失敗");
                 return;
             }
-            listSets(result.path);
+            listSets(result.path, selectionKey);
             setStatus(result.message);
         };
 
@@ -3420,6 +3680,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         w.onResize = function () { this.layout.resize(); saveSettings(); };
         w.onClose = function () { saveSettings(); $.global.shortcutSearchWindow = null; };
 
+        refreshCurrentScriptCatalog();
         rebuildCommands([]);
         render();
         listSets("");
