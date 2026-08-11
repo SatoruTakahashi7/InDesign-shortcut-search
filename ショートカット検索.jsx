@@ -1,7 +1,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=com.satorutakahashi.indesign.shortcut-search.jsx
-Version=1.0.10
+Version=1.0.5
 Meta-URL=https://github.com/SatoruTakahashi7/InDesign-shortcut-search
 Target-App=indesign
 Name=ショートカット検索
@@ -14,8 +14,8 @@ Description-END
 SCRIPTMETA-END
 
     ショートカット検索 JSX版
-    Version: 1.0.10
-    Updated: 2026-08-09
+    Version: 1.0.5
+    Updated: 2026-08-11
 
     Credits:
     - Planning / testing / direction: GYAHTEI Design Laboratory @gyahtei_satoru
@@ -475,6 +475,8 @@ function gyahteiScriptPathLabel(labels, file) {
 function gyahteiCollectCurrentScripts(node, labels, result, seen) {
     var i;
     if (node instanceof File) {
+        /* Scriptsパネルに現れても実行コマンドにはならない書庫は除外する。 */
+        if (/\.(zip|zxp)$/i.test(String(node.name || ""))) { return; }
         var displayName = gyahteiScriptPathLabel(labels, node);
         if (!seen[displayName]) {
             seen[displayName] = true;
@@ -516,6 +518,70 @@ function gyahteiListCurrentScripts() {
         return gyahteiJson({ok: true, scripts: result});
     } catch (error) {
         return gyahteiJson({ok: false, scripts: [], message: error.message});
+    }
+}
+
+function gyahteiSaveShortcutRecords(sourcePath, newSetName, records, allowOverwrite) {
+    try {
+        newSetName = String(newSetName || "").replace(/^\s+|\s+$/g, "");
+        if (!newSetName) {
+            return gyahteiJson({ok: false, message: "保存先のセット名を入力してください"});
+        }
+        if (/[\\\/:*?\"<>|]/.test(newSetName)) {
+            return gyahteiJson({ok: false, message: "セット名に使用できない文字が含まれています"});
+        }
+        var source = new File(sourcePath);
+        if (!source.exists) {
+            return gyahteiJson({ok: false, message: "元のセットが見つかりません"});
+        }
+        var targetFolder = gyahteiGetUserShortcutFolder(true);
+        if (!targetFolder && !allowOverwrite) {
+            return gyahteiJson({ok: false, message: "ユーザー用ショートカットフォルダーを特定できません"});
+        }
+        var target = allowOverwrite ? source : new File(targetFolder.fsName + "/" + newSetName + ".indk");
+        if (target.exists && !allowOverwrite) {
+            return gyahteiJson({ok: false, message: "同名のセットが既にあります。別の名前を指定してください"});
+        }
+        var xmlText = gyahteiReadUtf8(source);
+        var headerMatch = /^[\s\S]*?<shortcut-set\b[^>]*>\s*/.exec(xmlText);
+        if (!headerMatch) {
+            return gyahteiJson({ok: false, message: "INDKのXML構造を確認できません"});
+        }
+        var blocks = [];
+        var i;
+        for (i = 0; i < records.length; i++) {
+            var record = records[i];
+            if (!gyahteiParseActionExpression(record.actionIdExpression) ||
+                    !record.context || !record.shortcut) {
+                continue;
+            }
+            blocks.push(gyahteiShortcutBlock(
+                record.actionIdExpression,
+                record.internalName || "",
+                record.context,
+                gyahteiCanonicalShortcut(record.shortcut)
+            ));
+        }
+        gyahteiWriteUtf8(target, headerMatch[0] + blocks.join("") + "</shortcut-set>\n");
+        var applied = false;
+        var applyMessage = "";
+        try {
+            gyahteiApplyShortcutSetFresh(newSetName);
+            applied = true;
+        } catch (applyError) {
+            applyMessage = "保存しましたが自動適用できませんでした。キーボードショートカット画面で選択してください: " + applyError.message;
+        }
+        return gyahteiJson({
+            ok: true,
+            path: target.fsName,
+            name: newSetName,
+            applied: applied,
+            message: applied
+                ? (allowOverwrite ? "変更を保存してユーザーセットを適用しました" : "新しいセットを保存して適用しました")
+                : applyMessage
+        });
+    } catch (error) {
+        return gyahteiJson({ok: false, message: error.message});
     }
 }
 
@@ -776,6 +842,8 @@ function gyahteiCaptureShortcut() {
         function handleKeyDown(event) {
             var keyName = String(event.keyName || event.keyIdentifier || "");
             if (/^(Meta|Command|Control|Ctrl|Alt|Option|Shift)$/i.test(keyName)) {
+                try { event.preventDefault(); } catch (ignoreModifierPrevent) {}
+                try { event.stopPropagation(); } catch (ignoreModifierStop) {}
                 return;
             }
             var token = gyahteiScriptUiKeyToken(keyName);
@@ -797,16 +865,20 @@ function gyahteiCaptureShortcut() {
             result = parts.join("+");
             try { event.preventDefault(); } catch (ignorePrevent) {}
             try { event.stopPropagation(); } catch (ignoreStop) {}
-            dialog.close(1);
+            /* InDesign 20.5ではkeydown中のclose()が無視されるため、先に非表示化する。 */
+            try { dialog.hide(); } catch (ignoreHide) {}
+            try { dialog.close(1); } catch (ignoreClose) {}
         }
 
-        capture.addEventListener("keydown", handleKeyDown);
+        /* ダイアログ全体で取得し、通常の伝播段階で閉じられるようにする。 */
+        dialog.addEventListener("keydown", handleKeyDown);
         dialog.onShow = function () {
             capture.active = true;
         };
         cancelButton.onClick = function () { dialog.close(0); };
         var dialogResult = dialog.show();
-        if (dialogResult !== 1 || !result) {
+        /* hide()で終了した環境では戻り値が0でも、取得結果があれば成功とする。 */
+        if (!result) {
             return gyahteiJson({ok: false, canceled: true, message: "キー記録をキャンセルしました"});
         }
         return gyahteiJson({ok: true, shortcut: result});
@@ -2847,12 +2919,16 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"テキストスタイルの適用","area":"テキストと表","shortcutText":"デフォルト: Cmd+Num 0, デフォルト: Shift+Num 0, デフォルト: Shift+Cmd+Num 0, デフォルト: Opt+Num 0, デフォルト: Opt+Cmd+Num 0, デフォルト: Opt+Shift+Num 0, デフォルト: Opt+Shift+Cmd+Num 0, デフォルト: Cmd+Num 1, デフォルト: Shift+Num 1, デフォルト: Shift+Cmd+Num 1, デフォルト: Opt+Num 1, デフォルト: Opt+Cmd+Num 1, デフォルト: Opt+Shift+Num 1, デフォルト: Opt+Shift+Cmd+Num 1, デフォルト: Cmd+Num 2, デフォルト: Shift+Num 2, デフォルト: Shift+Cmd+Num 2, デフォルト: Opt+Num 2, デフォルト: Opt+Cmd+Num 2, デフォルト: Opt+Shift+Num 2, デフォルト: Opt+Shift+Cmd+Num 2, デフォルト: Cmd+Num 3, デフォルト: Shift+Num 3, デフォルト: Shift+Cmd+Num 3, デフォルト: Opt+Num 3, デフォルト: Opt+Cmd+Num 3, デフォルト: Opt+Shift+Num 3, デフォルト: Opt+Shift+Cmd+Num 3, デフォルト: Cmd+Num 4, デフォルト: Shift+Num 4, デフォルト: Shift+Cmd+Num 4, デフォルト: Opt+Num 4, デフォルト: Opt+Cmd+Num 4, デフォルト: Opt+Shift+Num 4, デフォルト: Opt+Shift+Cmd+Num 4, デフォルト: Cmd+Num 5, デフォルト: Shift+Num 5, デフォルト: Shift+Cmd+Num 5, デフォルト: Opt+Num 5, デフォルト: Opt+Cmd+Num 5, デフォルト: Opt+Shift+Num 5, デフォルト: Opt+Shift+Cmd+Num 5, デフォルト: Cmd+Num 6, デフォルト: Shift+Num 6, デフォルト: Shift+Cmd+Num 6, デフォルト: Opt+Num 6, デフォルト: Opt+Cmd+Num 6, デフォルト: Opt+Shift+Num 6, デフォルト: Opt+Shift+Cmd+Num 6, デフォルト: Cmd+Num 7, デフォルト: Shift+Num 7, デフォルト: Shift+Cmd+Num 7, デフォルト: Opt+Num 7, デフォルト: Opt+Cmd+Num 7, デフォルト: Opt+Shift+Num 7, デフォルト: Opt+Shift+Cmd+Num 7, デフォルト: Cmd+Num 8, デフォルト: Shift+Num 8, デフォルト: Shift+Cmd+Num 8, デフォルト: Opt+Num 8, デフォルト: Opt+Cmd+Num 8, デフォルト: Opt+Shift+Num 8, デフォルト: Opt+Shift+Cmd+Num 8, デフォルト: Cmd+Num 9, デフォルト: Shift+Num 9, デフォルト: Shift+Cmd+Num 9, デフォルト: Opt+Num 9, デフォルト: Opt+Cmd+Num 9, デフォルト: Opt+Shift+Num 9, デフォルト: Opt+Shift+Cmd+Num 9","defined":true,"actionId":119628,"actionIdExpression":"0x1d300 + 76","internalName":"KBSCE Text and Tables:Apply text style","aliases":["テキストスタイルの適用","KBSCE Text and Tables:Apply text style"],"executable":true,"source":"GYAHTEI.indk/runtime","id":2013}];
 
 (function () {
-    var SS_VERSION = "1.0.10";
+    var SS_VERSION = "1.0.5";
     var MAX_RESULTS = 300;
     var commands = [];
     var selectedCommand = null;
     var currentSet = null;
     var currentScriptCatalog = [];
+    var originalRecords = [];
+    var workingRecords = [];
+    var pendingDirty = false;
+    var suppressSetChange = false;
 
     var contextLabels = {
         DefaultContext: "デフォルト",
@@ -2986,6 +3062,20 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         return copy;
     }
 
+    function copyRecords(records) {
+        var result = [];
+        var i;
+        var key;
+        for (i = 0; i < records.length; i++) {
+            var record = {};
+            for (key in records[i]) {
+                if (records[i].hasOwnProperty(key)) { record[key] = records[i][key]; }
+            }
+            result.push(record);
+        }
+        return result;
+    }
+
     function searchText(command) {
         return normalize([
             command.name, command.area, command.shortcutText,
@@ -3094,6 +3184,13 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         var aliases = command.aliases || [];
         var i;
         for (i = 0; i < aliases.length; i++) { candidates.push(aliases[i]); }
+        var normalizedScriptName = gyahteiNormalizeScriptPathName(command.name);
+        if (normalizedScriptName) {
+            candidates.push(normalizedScriptName);
+            candidates.push(normalizedScriptName.replace(/:/g, ": "));
+            candidates.push("スクリプト:" + normalizedScriptName);
+            candidates.push("スクリプト: " + normalizedScriptName.replace(/:/g, ": "));
+        }
         var colon = String(command.name || "").lastIndexOf(":");
         if (colon >= 0) { candidates.push(trim(command.name.slice(colon + 1))); }
         return candidates;
@@ -3241,7 +3338,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         var detailArea = detailPanel.add("statictext", undefined, "");
         detailArea.preferredSize.height = 18;
         var detailAction = detailPanel.add("statictext", undefined, "");
-        detailAction.preferredSize.height = 18;
+        detailAction.preferredSize.height = 0;
+        detailAction.maximumSize.height = 0;
+        detailAction.visible = false;
 
         var editorGroup = detailPanel.add("group");
         editorGroup.orientation = "column";
@@ -3249,14 +3348,25 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         editorGroup.alignment = ["fill", "top"];
         editorGroup.spacing = 5;
 
+        var currentTitle = editorGroup.add("statictext", undefined, "現在のショートカット:");
         var currentGroup = editorGroup.add("group");
-        currentGroup.add("statictext", undefined, "現在のショートカット:");
-        var currentDropdown = currentGroup.add("dropdownlist", undefined, []);
-        currentDropdown.alignment = ["fill", "center"];
-        currentDropdown.minimumSize.width = 250;
+        currentGroup.alignment = ["fill", "top"];
+        currentGroup.alignChildren = ["fill", "top"];
+        var currentList = currentGroup.add("listbox", undefined, []);
+        currentList.alignment = ["fill", "top"];
+        currentList.minimumSize.height = 58;
+        currentList.preferredSize.height = 58;
         var deleteButton = currentGroup.add("button", undefined, "削除");
 
+        var assignLabels = editorGroup.add("group");
+        var newShortcutLabel = assignLabels.add("statictext", undefined, "新規ショートカット:");
+        newShortcutLabel.minimumSize.width = 180;
+        assignLabels.add("statictext", undefined, "内容:");
+
         var assignGroup = editorGroup.add("group");
+        var captureDisplay = assignGroup.add("edittext", undefined, "");
+        captureDisplay.minimumSize.width = 180;
+        captureDisplay.helpTip = "クリックするとキー記録画面を開きます";
         var contextDropdown = assignGroup.add("dropdownlist", undefined, []);
         var ci;
         for (ci = 0; ci < contextValues.length; ci++) {
@@ -3264,32 +3374,29 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             contextItem._value = contextValues[ci];
         }
         contextDropdown.selection = 0;
-        contextDropdown.minimumSize.width = 145;
+        contextDropdown.minimumSize.width = 210;
         contextDropdown.helpTip = "ショートカットが有効になる適用範囲です。通常は「デフォルト」を使用します";
-        var captureDisplay = assignGroup.add("edittext", undefined, "", {readonly: true});
-        captureDisplay.alignment = ["fill", "center"];
-        captureDisplay.helpTip = "ここをクリックしてキーを記録";
-        var captureButton = assignGroup.add("button", undefined, "キーを記録…");
-
-        var manualInput = editorGroup.add("edittext", undefined, "");
-        manualInput.helpTip = "記録できない場合は Cmd+K のように直接入力";
+        var assignButton = assignGroup.add("button", undefined, "割り当て");
         var conflictText = editorGroup.add("statictext", undefined, "", {multiline: true});
-        conflictText.preferredSize.height = 0;
-        conflictText.maximumSize.height = 0;
-        conflictText.visible = false;
+        conflictText.preferredSize.height = 34;
+        conflictText.maximumSize.height = 52;
 
         var saveGroup = editorGroup.add("group");
+        var saveDestinationLabel = saveGroup.add("statictext", undefined, "保存先:");
         var setNameInput = saveGroup.add("edittext", undefined, "");
         setNameInput.alignment = ["fill", "center"];
         setNameInput.minimumSize.width = 255;
-        var saveButton = saveGroup.add("button", undefined, "割り当てて保存");
+        var revertButton = saveGroup.add("button", undefined, "変更を取り消す");
+        var saveButton = saveGroup.add("button", undefined, "保存");
         var editorNote = editorGroup.add("statictext", undefined, "", {multiline: true});
         editorNote.preferredSize.height = 28;
 
         var actionGroup = detailPanel.add("group");
-        var invokeButton = actionGroup.add("button", undefined, "実行");
+        var invokeButton = actionGroup.add("button", undefined, "コマンドを実行");
+        invokeButton.helpTip = "選択中のInDesignコマンドを実行します。スクリプト項目は安全上実行できません";
         var statusText = actionGroup.add("statictext", undefined, "", {multiline: true});
         statusText.alignment = ["fill", "center"];
+        var closeButton = actionGroup.add("button", undefined, "閉じる");
 
         function setStatus(message) {
             statusText.text = String(message || "");
@@ -3318,9 +3425,15 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             detailShortcut.text = "";
             detailArea.text = "";
             detailAction.text = "";
-            editorGroup.visible = false;
+            editorGroup.visible = Boolean(currentSet);
+            currentList.removeAll();
+            captureDisplay.text = "";
+            captureDisplay._raw = "";
+            conflictText.text = "[割り当てなし]";
             invokeButton.enabled = false;
-            saveButton.enabled = false;
+            assignButton.enabled = false;
+            saveButton.enabled = pendingDirty;
+            revertButton.enabled = pendingDirty;
             deleteButton.enabled = false;
         }
 
@@ -3376,42 +3489,41 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             var overwrite = currentSet && (currentSet.kind === "ユーザー" || currentSet.kind === "パネル編集");
             setNameInput.enabled = !overwrite;
             setNameInput.text = overwrite ? currentSet.name : currentSet.name + " - カスタム";
-            saveButton.text = overwrite ? "割り当てて上書き" : "別名で保存";
             editorNote.text = overwrite
-                ? "ユーザーセット「" + currentSet.name + "」を上書きします。"
-                : "プリセットは変更せず、新しいユーザーセットとして保存します。";
+                ? (pendingDirty ? "未保存の変更があります。保存するとユーザーセットを上書きします。"
+                    : "保存済みの状態です。")
+                : (pendingDirty ? "未保存の変更があります。プリセットは変更せず別名で保存します。"
+                    : "プリセットは変更せず、新しいユーザーセットとして保存します。");
+            saveButton.enabled = pendingDirty;
+            revertButton.enabled = pendingDirty;
         }
 
         function updateCurrentAssignments() {
-            currentDropdown.removeAll();
+            currentList.removeAll();
             if (!selectedCommand) {
-                currentGroup.visible = false;
+                deleteButton.enabled = false;
                 return;
             }
             var i;
             for (i = 0; i < selectedCommand.assignments.length; i++) {
                 var assignment = selectedCommand.assignments[i];
-                var item = currentDropdown.add("item", (contextLabels[assignment.context] ||
+                var item = currentList.add("item", (contextLabels[assignment.context] ||
                     assignment.context) + ": " + displayShortcut(assignment.shortcut));
                 item._assignment = assignment;
             }
-            currentGroup.visible = selectedCommand.assignments.length > 0;
-            if (currentDropdown.items.length) { currentDropdown.selection = 0; }
-            deleteButton.enabled = currentDropdown.items.length > 0;
+            if (currentList.items.length) { currentList.selection = 0; }
+            deleteButton.enabled = currentList.items.length > 0;
         }
 
         function currentRawShortcut() {
-            return captureDisplay._raw || canonicalManualShortcut(manualInput.text);
+            return captureDisplay._raw || canonicalManualShortcut(captureDisplay.text);
         }
 
         function updateConflictDisplay() {
             var shortcut = currentRawShortcut();
             if (!shortcut || !selectedCommand) {
-                conflictText.text = "";
-                conflictText.visible = false;
-                conflictText.preferredSize.height = 0;
-                conflictText.maximumSize.height = 0;
-                saveButton.enabled = false;
+                conflictText.text = "[割り当てなし]";
+                assignButton.enabled = false;
                 w.layout.layout(true);
                 return [];
             }
@@ -3428,21 +3540,17 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             }
             var lines = [];
             if (conflicts.length) {
-                lines.push("同じコンテキストで使用中（保存時に置き換え可能）");
-                for (i = 0; i < conflicts.length; i++) { lines.push("・" + conflicts[i].command.name); }
-            } else if (!uses.length) {
-                lines.push("このキーはほかのコマンドで使用されていません。");
+                lines.push("現在の割り当て: " + conflicts[0].command.name);
+                for (i = 1; i < conflicts.length; i++) { lines.push("・" + conflicts[i].command.name); }
+            } else {
+                lines.push("[割り当てなし]");
             }
             if (other.length) {
-                if (lines.length) { lines.push(""); }
-                lines.push("別コンテキストで使用中（そのまま併用）");
+                lines.push("別の内容では使用中:");
                 lines = lines.concat(other);
             }
             conflictText.text = lines.join("\n");
-            conflictText.visible = lines.length > 0;
-            conflictText.preferredSize.height = lines.length > 2 ? 62 : 36;
-            conflictText.maximumSize.height = lines.length > 2 ? 62 : 36;
-            saveButton.enabled = true;
+            assignButton.enabled = Boolean(shortcut && selectedCommand);
             w.layout.layout(true);
             return conflicts;
         }
@@ -3452,17 +3560,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             detailName.text = command.name;
             detailShortcut.text = command.shortcutText;
             detailArea.text = "機能エリア: " + command.area;
-            detailAction.text = command.area === "スクリプト"
-                ? "内部識別番号: " + (command.actionIdExpression || "選択時に自動取得")
-                : "action-id: " + (command.actionIdExpression || "未調査");
             invokeButton.enabled = Boolean(command.executable);
             captureDisplay.text = "";
             captureDisplay._raw = "";
-            manualInput.text = "";
-            conflictText.text = "";
-            conflictText.visible = false;
-            conflictText.preferredSize.height = 0;
-            conflictText.maximumSize.height = 0;
+            conflictText.text = "[割り当てなし]";
 
             if (!command.actionIdExpression) {
                 var resolved = parseResult(gyahteiResolveMenuAction(resolutionCandidates(command)));
@@ -3474,13 +3575,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                         : (resolved.internalName || "");
                     command.executable = resolved.actionIdUnsigned < 4278190080;
                     detailArea.text = "機能エリア: " + command.area;
-                    detailAction.text = command.area === "スクリプト"
-                        ? "内部識別番号: " + resolved.actionIdExpression + "（自動）"
-                        : "action-id: " + resolved.actionIdExpression;
                     invokeButton.enabled = command.executable;
                 }
             }
-            editorGroup.visible = Boolean(currentSet && command.actionIdExpression);
+            editorGroup.visible = Boolean(currentSet);
             if (editorGroup.visible) {
                 var preferred = command.assignments.length ? command.assignments[0].context : "DefaultContext";
                 var i;
@@ -3492,8 +3590,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 }
                 updateSaveMode();
                 updateCurrentAssignments();
-            } else if (!command.actionIdExpression) {
-                setStatus("このコマンドのaction-idを特定できないため編集できません");
+                updateConflictDisplay();
+                if (!command.actionIdExpression) {
+                    setStatus("このスクリプトの割り当て先をInDesignから取得できません。割り当て時に再試行します");
+                }
             }
             w.layout.layout(true);
         }
@@ -3515,11 +3615,39 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 return;
             }
             currentSet = {name: result.name, path: result.path, kind: result.kind};
-            rebuildCommands(result.records || []);
+            originalRecords = copyRecords(result.records || []);
+            workingRecords = copyRecords(originalRecords);
+            pendingDirty = false;
+            rebuildCommands(workingRecords);
             render();
+            updateSaveMode();
             restoreCommandSelection(selectionKey);
             reloadButton.enabled = true;
             setStatus(result.name + " を読み込みました");
+        }
+
+        function confirmDiscardChanges() {
+            if (!pendingDirty) { return true; }
+            return confirm("保存していない変更があります。\n\n変更を取り消して続けますか？",
+                false, "未保存の変更");
+        }
+
+        function refreshWorkingCommands(selectionKey, message) {
+            rebuildCommands(workingRecords);
+            render();
+            restoreCommandSelection(selectionKey);
+            updateSaveMode();
+            setStatus(message || "未保存の変更があります");
+        }
+
+        function recordMatchesAssignment(record, command, assignment) {
+            var expression = assignment.actionIdExpression || command.actionIdExpression;
+            var internalName = assignment.internalName || command.internalName;
+            return gyahteiRecordMatchesAction(
+                record, gyahteiParseActionExpression(expression), internalName
+            ) && record.context === assignment.context &&
+                gyahteiCanonicalShortcut(record.shortcut) ===
+                    gyahteiCanonicalShortcut(assignment.shortcut);
         }
 
         function refreshCurrentScriptCatalog() {
@@ -3530,8 +3658,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 
         function listSets(preferredPath, selectionKey) {
             var result = parseResult(gyahteiListShortcutSets());
+            suppressSetChange = true;
             setDropdown.removeAll();
             if (!result.ok) {
+                suppressSetChange = false;
                 alert(result.message || "セット一覧を取得できません", "ショートカット検索");
                 return;
             }
@@ -3543,6 +3673,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             }
             if (selectedItem) { setDropdown.selection = selectedItem; }
             else if (setDropdown.items.length) { setDropdown.selection = 0; }
+            suppressSetChange = false;
             if (setDropdown.selection) { loadSet(setDropdown.selection._set, selectionKey); }
         }
 
@@ -3556,23 +3687,40 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         definedOnly.onClick = function () { saveSettings(); render(); };
         executableOnly.onClick = render;
         setDropdown.onChange = function () {
+            if (suppressSetChange) { return; }
             if (setDropdown.selection && setDropdown.selection._set) {
+                if (!confirmDiscardChanges()) {
+                    suppressSetChange = true;
+                    var i;
+                    for (i = 0; i < setDropdown.items.length; i++) {
+                        if (currentSet && setDropdown.items[i]._set.path === currentSet.path) {
+                            setDropdown.selection = i;
+                            break;
+                        }
+                    }
+                    suppressSetChange = false;
+                    return;
+                }
                 loadSet(setDropdown.selection._set);
             }
         };
         reloadButton.onClick = function () {
+            if (!confirmDiscardChanges()) { return; }
             var selectionKey = commandSelectionKey(selectedCommand);
             refreshCurrentScriptCatalog();
             if (currentSet) { loadSet(currentSet, selectionKey); }
         };
         chooseButton.onClick = function () {
+            if (!confirmDiscardChanges()) { return; }
             var result = parseResult(gyahteiChooseShortcutSet());
             if (!result.ok) {
                 if (!result.canceled) { alert(result.message, "ショートカット検索"); }
                 return;
             }
-            var item = addSetItem(result.set, true);
+            var item = addSetItem(result.set, false);
+            suppressSetChange = true;
             setDropdown.selection = item;
+            suppressSetChange = false;
             loadSet(result.set);
         };
         var captureDialogOpening = false;
@@ -3587,21 +3735,29 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 }
                 captureDisplay._raw = result.shortcut;
                 captureDisplay.text = displayShortcut(result.shortcut);
-                manualInput.text = "";
                 updateConflictDisplay();
             } finally {
                 captureDialogOpening = false;
             }
         }
-        captureButton.onClick = captureShortcutIntoDisplay;
-        captureDisplay.addEventListener("mousedown", function (event) {
-            try { event.preventDefault(); } catch (ignorePrevent) {}
-            try { event.stopPropagation(); } catch (ignoreStop) {}
+        var suppressReturnedCaptureFocus = false;
+        captureDisplay.onActivate = function () {
+            if (captureDialogOpening || !selectedCommand) { return; }
+            if (suppressReturnedCaptureFocus) {
+                /* 記録画面から入力欄へ自動で戻ったフォーカスでは再表示しない。 */
+                try { assignButton.active = true; } catch (ignoreReturnedActive) {}
+                return;
+            }
+            suppressReturnedCaptureFocus = true;
             captureShortcutIntoDisplay();
-        }, true);
-        manualInput.onChanging = function () {
+            /* モーダル終了後はボタンへ移し、次の実クリックを受けられる状態に戻す。 */
+            try { assignButton.active = true; } catch (ignoreActive) {}
+        };
+        captureDisplay.onDeactivate = function () {
+            if (!captureDialogOpening) { suppressReturnedCaptureFocus = false; }
+        };
+        captureDisplay.onChanging = function () {
             captureDisplay._raw = "";
-            captureDisplay.text = "";
             updateConflictDisplay();
         };
         contextDropdown.onChange = updateConflictDisplay;
@@ -3611,8 +3767,23 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             if (!result.ok) { alert(result.message || "コマンドを実行できません", "ショートカット検索"); }
             else { setStatus(result.message); }
         };
-        saveButton.onClick = function () {
+        closeButton.onClick = function () { w.close(); };
+        assignButton.onClick = function () {
             if (!selectedCommand || !currentSet) { return; }
+            if (!selectedCommand.actionIdExpression) {
+                var resolved = parseResult(gyahteiResolveMenuAction(resolutionCandidates(selectedCommand)));
+                if (!resolved.ok) {
+                    alert("このスクリプトに対応する割り当て先をInDesignから取得できません。\n\n" +
+                        "InDesign標準のキーボードショートカット画面では設定できる場合があります。",
+                        "割り当てできません");
+                    return;
+                }
+                selectedCommand.actionId = resolved.actionId;
+                selectedCommand.actionIdExpression = resolved.actionIdExpression;
+                selectedCommand.internalName = selectedCommand.area === "スクリプト"
+                    ? fullScriptInternalName(selectedCommand, resolved.name)
+                    : (resolved.internalName || "");
+            }
             if (selectedCommand.area === "スクリプト") {
                 selectedCommand.internalName = fullScriptInternalName(selectedCommand, "");
             }
@@ -3620,8 +3791,6 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             var raw = currentRawShortcut();
             if (!raw) { return; }
             var context = contextDropdown.selection._value;
-            var overwrite = currentSet.kind === "ユーザー" || currentSet.kind === "パネル編集";
-            var newSetName = overwrite ? currentSet.name : trim(setNameInput.text);
             var conflicts = updateConflictDisplay();
             if (conflicts.length) {
                 var names = [];
@@ -3634,9 +3803,68 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                     return;
                 }
             }
-            var result = parseResult(gyahteiSaveShortcutSet(
-                currentSet.path, newSetName, selectedCommand.actionIdExpression,
-                selectedCommand.internalName, context, raw, overwrite
+            var kept = [];
+            var i;
+            for (i = 0; i < workingRecords.length; i++) {
+                var existing = workingRecords[i];
+                var sameShortcutContext = existing.context === context &&
+                    gyahteiCanonicalShortcut(existing.shortcut) === gyahteiCanonicalShortcut(raw);
+                if (!sameShortcutContext) {
+                    kept.push(existing);
+                }
+            }
+            var idInfo = gyahteiParseActionExpression(selectedCommand.actionIdExpression);
+            kept.push({
+                actionId: idInfo.signedValue,
+                actionIdUnsigned: idInfo.unsignedValue,
+                actionIdExpression: selectedCommand.actionIdExpression,
+                internalName: selectedCommand.internalName || "",
+                context: context,
+                shortcut: gyahteiCanonicalShortcut(raw),
+                name: selectedCommand.name,
+                area: selectedCommand.area
+            });
+            workingRecords = kept;
+            pendingDirty = true;
+            captureDisplay.text = "";
+            captureDisplay._raw = "";
+            refreshWorkingCommands(selectionKey, "割り当てを仮登録しました。保存すると有効になります");
+        };
+        deleteButton.onClick = function () {
+            if (!selectedCommand || !currentSet || !currentList.selection) { return; }
+            var selectionKey = commandSelectionKey(selectedCommand);
+            var assignment = currentList.selection._assignment;
+            if (!confirm("「" + selectedCommand.name + "」から次の割り当てを削除します。\n\n" +
+                    (contextLabels[assignment.context] || assignment.context) + ": " +
+                    displayShortcut(assignment.shortcut) + "\n\n保存するまでは元に戻せます。",
+                    false, "ショートカットを削除しますか？")) {
+                return;
+            }
+            var kept = [];
+            var i;
+            for (i = 0; i < workingRecords.length; i++) {
+                if (!recordMatchesAssignment(workingRecords[i], selectedCommand, assignment)) {
+                    kept.push(workingRecords[i]);
+                }
+            }
+            workingRecords = kept;
+            pendingDirty = true;
+            refreshWorkingCommands(selectionKey, "削除を仮登録しました。保存すると有効になります");
+        };
+        revertButton.onClick = function () {
+            if (!pendingDirty) { return; }
+            var selectionKey = commandSelectionKey(selectedCommand);
+            workingRecords = copyRecords(originalRecords);
+            pendingDirty = false;
+            refreshWorkingCommands(selectionKey, "未保存の変更を取り消しました");
+        };
+        saveButton.onClick = function () {
+            if (!currentSet || !pendingDirty) { return; }
+            var selectionKey = commandSelectionKey(selectedCommand);
+            var overwrite = currentSet.kind === "ユーザー" || currentSet.kind === "パネル編集";
+            var newSetName = overwrite ? currentSet.name : trim(setNameInput.text);
+            var result = parseResult(gyahteiSaveShortcutRecords(
+                currentSet.path, newSetName, workingRecords, overwrite
             ));
             if (!result.ok) {
                 alert(result.message || "保存できません", "ショートカット検索");
@@ -3646,39 +3874,15 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             listSets(result.path, selectionKey);
             setStatus(result.message);
         };
-        deleteButton.onClick = function () {
-            if (!selectedCommand || !currentSet || !currentDropdown.selection) { return; }
-            var selectionKey = commandSelectionKey(selectedCommand);
-            var assignment = currentDropdown.selection._assignment;
-            var overwrite = currentSet.kind === "ユーザー" || currentSet.kind === "パネル編集";
-            var newSetName = overwrite ? currentSet.name : trim(setNameInput.text);
-            var destination = overwrite
-                ? "ユーザーセット「" + currentSet.name + "」を上書きします。"
-                : "プリセットは変更せず、「" + newSetName + "」へ別名保存します。";
-            if (!confirm("「" + selectedCommand.name + "」から次の割り当てを削除します。\n\n" +
-                    (contextLabels[assignment.context] || assignment.context) + ": " +
-                    displayShortcut(assignment.shortcut) + "\n\n" + destination,
-                    false, "ショートカットを削除しますか？")) {
-                return;
-            }
-            var result = parseResult(gyahteiDeleteShortcutAssignment(
-                currentSet.path, newSetName,
-                assignment.actionIdExpression || selectedCommand.actionIdExpression,
-                assignment.internalName || selectedCommand.internalName,
-                assignment.context, assignment.shortcut, overwrite
-            ));
-            if (!result.ok) {
-                alert(result.message || "削除できません", "ショートカット検索");
-                setStatus(result.message || "削除失敗");
-                return;
-            }
-            listSets(result.path, selectionKey);
-            setStatus(result.message);
-        };
 
         w.onResizing = function () { this.layout.resize(); };
         w.onResize = function () { this.layout.resize(); saveSettings(); };
-        w.onClose = function () { saveSettings(); $.global.shortcutSearchWindow = null; };
+        w.onClose = function () {
+            if (!confirmDiscardChanges()) { return false; }
+            saveSettings();
+            $.global.shortcutSearchWindow = null;
+            return true;
+        };
 
         refreshCurrentScriptCatalog();
         rebuildCommands([]);
