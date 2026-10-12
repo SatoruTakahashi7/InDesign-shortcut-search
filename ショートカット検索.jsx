@@ -1,7 +1,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=com.satorutakahashi.indesign.shortcut-search.jsx
-Version=1.0.10
+Version=1.0.12
 Meta-URL=https://github.com/SatoruTakahashi7/InDesign-shortcut-search
 Target-App=indesign
 Name=ショートカット検索
@@ -14,7 +14,7 @@ Description-END
 SCRIPTMETA-END
 
     ショートカット検索 JSX版
-    Version: 1.0.10
+    Version: 1.0.12
     Updated: 2026-10-12
 
     Credits:
@@ -885,15 +885,16 @@ function gyahteiScriptUiKeyToken(keyName) {
     return "";
 }
 
-function gyahteiCaptureShortcut() {
+function gyahteiCaptureShortcut(forSearch) {
     try {
         var result = "";
-        var dialog = new Window("dialog", "ショートカットを記録");
+        var dialog = new Window("dialog", forSearch ? "キーで検索" : "ショートカットを記録");
         dialog.orientation = "column";
         dialog.alignChildren = ["fill", "top"];
         dialog.margins = 16;
         dialog.spacing = 10;
-        dialog.add("statictext", undefined, "割り当てたいキーを押してください");
+        dialog.add("statictext", undefined, forSearch
+            ? "検索したいキーを押してください" : "割り当てたいキーを押してください");
         var capture = dialog.add("edittext", undefined, "キー入力待機中…");
         capture.characters = 32;
         var cancelButton = dialog.add("button", undefined, "キャンセル", {name: "cancel"});
@@ -1783,16 +1784,16 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 20260718: TableLineHelper-.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":818},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 20260718: TableLineHelper.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":819},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableCellSizeMatcher.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":820},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":821},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.11.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":822},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.12.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":821},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.12.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":822},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.2.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":823},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.3-diagnostic.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":824},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.4.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":825},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.5.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":826},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.6.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":827},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":828},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":829},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":830},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.12.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":828},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.12.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":829},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.12.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":830},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":831},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線: SmartBorderBuilder.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":832},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線: 罫線の設定.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":833},
@@ -2978,7 +2979,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"テキストスタイルの適用","area":"テキストと表","shortcutText":"デフォルト: Cmd+Num 0, デフォルト: Shift+Num 0, デフォルト: Shift+Cmd+Num 0, デフォルト: Opt+Num 0, デフォルト: Opt+Cmd+Num 0, デフォルト: Opt+Shift+Num 0, デフォルト: Opt+Shift+Cmd+Num 0, デフォルト: Cmd+Num 1, デフォルト: Shift+Num 1, デフォルト: Shift+Cmd+Num 1, デフォルト: Opt+Num 1, デフォルト: Opt+Cmd+Num 1, デフォルト: Opt+Shift+Num 1, デフォルト: Opt+Shift+Cmd+Num 1, デフォルト: Cmd+Num 2, デフォルト: Shift+Num 2, デフォルト: Shift+Cmd+Num 2, デフォルト: Opt+Num 2, デフォルト: Opt+Cmd+Num 2, デフォルト: Opt+Shift+Num 2, デフォルト: Opt+Shift+Cmd+Num 2, デフォルト: Cmd+Num 3, デフォルト: Shift+Num 3, デフォルト: Shift+Cmd+Num 3, デフォルト: Opt+Num 3, デフォルト: Opt+Cmd+Num 3, デフォルト: Opt+Shift+Num 3, デフォルト: Opt+Shift+Cmd+Num 3, デフォルト: Cmd+Num 4, デフォルト: Shift+Num 4, デフォルト: Shift+Cmd+Num 4, デフォルト: Opt+Num 4, デフォルト: Opt+Cmd+Num 4, デフォルト: Opt+Shift+Num 4, デフォルト: Opt+Shift+Cmd+Num 4, デフォルト: Cmd+Num 5, デフォルト: Shift+Num 5, デフォルト: Shift+Cmd+Num 5, デフォルト: Opt+Num 5, デフォルト: Opt+Cmd+Num 5, デフォルト: Opt+Shift+Num 5, デフォルト: Opt+Shift+Cmd+Num 5, デフォルト: Cmd+Num 6, デフォルト: Shift+Num 6, デフォルト: Shift+Cmd+Num 6, デフォルト: Opt+Num 6, デフォルト: Opt+Cmd+Num 6, デフォルト: Opt+Shift+Num 6, デフォルト: Opt+Shift+Cmd+Num 6, デフォルト: Cmd+Num 7, デフォルト: Shift+Num 7, デフォルト: Shift+Cmd+Num 7, デフォルト: Opt+Num 7, デフォルト: Opt+Cmd+Num 7, デフォルト: Opt+Shift+Num 7, デフォルト: Opt+Shift+Cmd+Num 7, デフォルト: Cmd+Num 8, デフォルト: Shift+Num 8, デフォルト: Shift+Cmd+Num 8, デフォルト: Opt+Num 8, デフォルト: Opt+Cmd+Num 8, デフォルト: Opt+Shift+Num 8, デフォルト: Opt+Shift+Cmd+Num 8, デフォルト: Cmd+Num 9, デフォルト: Shift+Num 9, デフォルト: Shift+Cmd+Num 9, デフォルト: Opt+Num 9, デフォルト: Opt+Cmd+Num 9, デフォルト: Opt+Shift+Num 9, デフォルト: Opt+Shift+Cmd+Num 9","defined":true,"actionId":119628,"actionIdExpression":"0x1d300 + 76","internalName":"KBSCE Text and Tables:Apply text style","aliases":["テキストスタイルの適用","KBSCE Text and Tables:Apply text style"],"executable":true,"source":"GYAHTEI.indk/runtime","id":2013}];
 
 (function () {
-    var SS_VERSION = "1.0.10";
+    var SS_VERSION = "1.0.12";
     var MAX_RESULTS = 300;
     var commands = [];
     var selectedCommand = null;
@@ -3107,6 +3108,27 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
             }
         }
         return gyahteiCanonicalShortcut(result.join("+"));
+    }
+
+    function shortcutSearchQuery(value) {
+        var text = trim(value);
+        if (!/[⌘⇧⌥⌃]/.test(text) &&
+                !/^(cmd|command|meta|shift|opt|option|alt|ctrl|control)\s*\+/i.test(text)) {
+            return "";
+        }
+        text = text.replace(/([⌘⇧⌥⌃])/g, "$1+").replace(/\+\s*\+/g, "+");
+        return normalize(canonicalManualShortcut(text));
+    }
+
+    function matchesShortcutSearch(command, query) {
+        var assignments = command.assignments || [];
+        var i;
+        for (i = 0; i < assignments.length; i++) {
+            if (normalize(canonicalManualShortcut(assignments[i].shortcut)) === query) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function copyCommand(source) {
@@ -3353,9 +3375,13 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
         var chooseButton = setGroup.add("button", undefined, "ファイル…");
         var reloadButton = setGroup.add("button", undefined, "再読込");
 
-        var searchInput = w.add("edittext", undefined, "");
+        var searchGroup = w.add("group");
+        searchGroup.alignment = ["fill", "top"];
+        var searchInput = searchGroup.add("edittext", undefined, "");
         searchInput.alignment = ["fill", "top"];
-        searchInput.helpTip = "コマンド名・キー・機能エリアを検索";
+        searchInput.helpTip = "コマンド名・キー・機能エリアを検索。実際のキー入力は「キーで検索」から";
+        var searchKeyButton = searchGroup.add("button", undefined, "キーで検索");
+        searchKeyButton.helpTip = "キーを押して、現在のセットの割り当てを逆引き";
 
         var filterGroup = w.add("group");
         filterGroup.alignment = ["fill", "top"];
@@ -3527,6 +3553,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 
         function render() {
             var query = normalize(searchInput.text);
+            var shortcutQuery = searchInput._shortcutQuery || shortcutSearchQuery(searchInput.text);
             var area = selectedAreaValue();
             resultList.removeAll();
             clearSelection();
@@ -3538,7 +3565,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 if (definedOnly.value && !command.defined) { continue; }
                 if (executableOnly.value && !command.executable) { continue; }
                 if (area && command.area !== area) { continue; }
-                if (query && command._search.indexOf(query) < 0) { continue; }
+                if (shortcutQuery) {
+                    if (!matchesShortcutSearch(command, shortcutQuery)) { continue; }
+                } else if (query && command._search.indexOf(query) < 0) { continue; }
                 count++;
                 if (rendered >= MAX_RESULTS) { continue; }
                 var item = resultList.add("item", command.name);
@@ -3747,7 +3776,20 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 showSelectedCommand(resultList.selection._command);
             }
         };
-        searchInput.onChanging = render;
+        searchInput.onChanging = function () {
+            searchInput._shortcutQuery = "";
+            render();
+        };
+        searchKeyButton.onClick = function () {
+            var result = parseResult(gyahteiCaptureShortcut(true));
+            if (!result.ok) {
+                if (!result.canceled) { alert(result.message, "キーで検索"); }
+                return;
+            }
+            searchInput.text = displayShortcut(result.shortcut);
+            searchInput._shortcutQuery = normalize(canonicalManualShortcut(result.shortcut));
+            render();
+        };
         areaDropdown.onChange = render;
         definedOnly.onClick = function () { saveSettings(); render(); };
         executableOnly.onClick = render;
