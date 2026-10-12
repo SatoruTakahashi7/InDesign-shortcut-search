@@ -1,7 +1,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=com.satorutakahashi.indesign.shortcut-search.jsx
-Version=1.0.5
+Version=1.0.10
 Meta-URL=https://github.com/SatoruTakahashi7/InDesign-shortcut-search
 Target-App=indesign
 Name=ショートカット検索
@@ -9,13 +9,13 @@ Author=GYAHTEI Design Laboratory / Satoru Takahashi
 Description-BEGIN
 InDesignのショートカットセットを読み込み、コマンド名・キー・機能エリアを
 検索します。既存コマンドの実行、ショートカットの追加・競合置換・削除にも
-対応します。プリセットは別名保存し、ユーザーセットは確認後に上書きします。
+対応します。プリセットは別名保存し、ユーザーセットは上書きします。
 Description-END
 SCRIPTMETA-END
 
     ショートカット検索 JSX版
-    Version: 1.0.5
-    Updated: 2026-08-11
+    Version: 1.0.10
+    Updated: 2026-10-12
 
     Credits:
     - Planning / testing / direction: GYAHTEI Design Laboratory @gyahtei_satoru
@@ -23,7 +23,7 @@ SCRIPTMETA-END
 
     注意事項:
     - このファイルだけで動作する単体版です。
-    - プリセットは直接変更しません。ユーザーセットは確認後に上書きします。
+    - プリセットは直接変更しません。ユーザーセットは上書きします。
     - .indkを更新した後、app.applyShortcutSet()でセットを適用します。
     - action-idがセッションごとに変わるスクリプト項目は実行対象外です。
     - InDesign 2023（18.5以降）・2024・2025・2026を対象にしています。
@@ -190,7 +190,8 @@ function gyahteiParseIndk(xmlText, resolveNames) {
         var idInfo = gyahteiParseActionExpression(expression);
         var localizedName = "";
         var area = "";
-        if (resolveNames && idInfo && internalName !== "" && idInfo.unsignedValue < 4278190080) {
+        /* 内部名がない新規割り当ても、固定action-idから表示名を復元する。 */
+        if (resolveNames && idInfo && idInfo.unsignedValue < 4278190080) {
             var cacheKey = String(idInfo.unsignedValue);
             if (nameCache.hasOwnProperty(cacheKey)) {
                 localizedName = nameCache[cacheKey].name;
@@ -538,6 +539,7 @@ function gyahteiSaveShortcutRecords(sourcePath, newSetName, records, allowOverwr
         if (!targetFolder && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "ユーザー用ショートカットフォルダーを特定できません"});
         }
+        /* ユーザーセットは読み込んだファイルそのものへ上書きする。 */
         var target = allowOverwrite ? source : new File(targetFolder.fsName + "/" + newSetName + ".indk");
         if (target.exists && !allowOverwrite) {
             return gyahteiJson({ok: false, message: "同名のセットが既にあります。別の名前を指定してください"});
@@ -547,10 +549,22 @@ function gyahteiSaveShortcutRecords(sourcePath, newSetName, records, allowOverwr
         if (!headerMatch) {
             return gyahteiJson({ok: false, message: "INDKのXML構造を確認できません"});
         }
-        var blocks = [];
+        /* 標準画面の出力と同じaction-id順に並べる。元配列は変更しない。 */
+        var orderedRecords = [];
         var i;
         for (i = 0; i < records.length; i++) {
-            var record = records[i];
+            orderedRecords.push({record: records[i], index: i});
+        }
+        orderedRecords.sort(function (a, b) {
+            var ai = gyahteiParseActionExpression(a.record.actionIdExpression);
+            var bi = gyahteiParseActionExpression(b.record.actionIdExpression);
+            var av = ai ? ai.unsignedValue : 4294967296;
+            var bv = bi ? bi.unsignedValue : 4294967296;
+            return av === bv ? a.index - b.index : av - bv;
+        });
+        var blocks = [];
+        for (i = 0; i < orderedRecords.length; i++) {
+            var record = orderedRecords[i].record;
             if (!gyahteiParseActionExpression(record.actionIdExpression) ||
                     !record.context || !record.shortcut) {
                 continue;
@@ -577,7 +591,7 @@ function gyahteiSaveShortcutRecords(sourcePath, newSetName, records, allowOverwr
             name: newSetName,
             applied: applied,
             message: applied
-                ? (allowOverwrite ? "変更を保存してユーザーセットを適用しました" : "新しいセットを保存して適用しました")
+                ? (allowOverwrite ? "ユーザーセットを上書きし、適用を要求しました。標準画面で反映されない場合はInDesignを再起動して確認してください" : "新しいセットを保存し、適用を要求しました。標準画面で確認してください")
                 : applyMessage
         });
     } catch (error) {
@@ -585,7 +599,52 @@ function gyahteiSaveShortcutRecords(sourcePath, newSetName, records, allowOverwr
     }
 }
 
+/* 現在のInDesignに付属するINDKから、保存用の内部名を取得する。 */
+function gyahteiShortcutInternalName(expression, internalName) {
+    if (internalName) { return internalName; }
+    var idInfo = gyahteiParseActionExpression(expression);
+    if (!idInfo || idInfo.unsignedValue >= 4278190080) { return ""; }
+    if (!gyahteiShortcutInternalName._names) {
+        var names = {};
+        var root = gyahteiGetPresetShortcutFolder();
+        var files = [];
+        if (root && root.exists) {
+            gyahteiPushIndkFiles(root, "プリセット", files);
+            var folders = root.getFiles(function (entry) { return entry instanceof Folder; });
+            var i;
+            for (i = 0; i < folders.length; i++) {
+                gyahteiPushIndkFiles(folders[i], "プリセット", files);
+            }
+            for (i = 0; i < files.length; i++) {
+                try {
+                    var records = gyahteiParseIndk(gyahteiReadUtf8(new File(files[i].path)), false);
+                    var j;
+                    for (j = 0; j < records.length; j++) {
+                        var record = records[j];
+                        if (record.actionIdUnsigned !== null && record.internalName) {
+                            var key = String(record.actionIdUnsigned);
+                            if (!names[key] || /^KBSCE /.test(record.internalName)) {
+                                names[key] = record.internalName;
+                            }
+                        }
+                    }
+                } catch (ignorePresetRead) {}
+            }
+        }
+        gyahteiShortcutInternalName._names = names;
+    }
+    return gyahteiShortcutInternalName._names[String(idInfo.unsignedValue)] || "";
+}
+
 function gyahteiShortcutBlock(expression, internalName, context, shortcut) {
+    /* InDesign自身が保存する「プラグイン基底ID + オフセット」表記に統一する。 */
+    var idInfo = gyahteiParseActionExpression(expression);
+    if (idInfo) {
+        var base = idInfo.unsignedValue >= 4278190080
+            ? 4278190080 : Math.floor(idInfo.unsignedValue / 256) * 256;
+        expression = "0x" + base.toString(16) + " + " + (idInfo.unsignedValue - base);
+    }
+    internalName = gyahteiShortcutInternalName(expression, internalName);
     var nameAttribute = internalName ? " name=\"" + gyahteiEncodeXml(internalName) + "\"" : "";
     return "\t<shortcut>\n" +
         "\t\t<action-id value=\"" + gyahteiEncodeXml(expression) + "\"" + nameAttribute + "></action-id>\n" +
@@ -1731,9 +1790,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.4.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":825},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.5.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":826},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.6.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":827},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.7.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":828},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.8.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":829},
-{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.9.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":830},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":828},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":829},
+{"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: TableLineHelper-v1.0.10.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":830},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":831},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線: SmartBorderBuilder.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":832},
 {"name":"ユーザー: 02_表組: 22-表組: 名称未設定フォルダ: 表組の罫線: 罫線の設定.jsx","area":"スクリプト","shortcutText":"[定義なし]","defined":false,"actionId":null,"actionIdExpression":"","internalName":"","aliases":[],"executable":false,"source":"GYAHTEI.txt","id":833},
@@ -2919,7 +2978,7 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
 {"name":"テキストスタイルの適用","area":"テキストと表","shortcutText":"デフォルト: Cmd+Num 0, デフォルト: Shift+Num 0, デフォルト: Shift+Cmd+Num 0, デフォルト: Opt+Num 0, デフォルト: Opt+Cmd+Num 0, デフォルト: Opt+Shift+Num 0, デフォルト: Opt+Shift+Cmd+Num 0, デフォルト: Cmd+Num 1, デフォルト: Shift+Num 1, デフォルト: Shift+Cmd+Num 1, デフォルト: Opt+Num 1, デフォルト: Opt+Cmd+Num 1, デフォルト: Opt+Shift+Num 1, デフォルト: Opt+Shift+Cmd+Num 1, デフォルト: Cmd+Num 2, デフォルト: Shift+Num 2, デフォルト: Shift+Cmd+Num 2, デフォルト: Opt+Num 2, デフォルト: Opt+Cmd+Num 2, デフォルト: Opt+Shift+Num 2, デフォルト: Opt+Shift+Cmd+Num 2, デフォルト: Cmd+Num 3, デフォルト: Shift+Num 3, デフォルト: Shift+Cmd+Num 3, デフォルト: Opt+Num 3, デフォルト: Opt+Cmd+Num 3, デフォルト: Opt+Shift+Num 3, デフォルト: Opt+Shift+Cmd+Num 3, デフォルト: Cmd+Num 4, デフォルト: Shift+Num 4, デフォルト: Shift+Cmd+Num 4, デフォルト: Opt+Num 4, デフォルト: Opt+Cmd+Num 4, デフォルト: Opt+Shift+Num 4, デフォルト: Opt+Shift+Cmd+Num 4, デフォルト: Cmd+Num 5, デフォルト: Shift+Num 5, デフォルト: Shift+Cmd+Num 5, デフォルト: Opt+Num 5, デフォルト: Opt+Cmd+Num 5, デフォルト: Opt+Shift+Num 5, デフォルト: Opt+Shift+Cmd+Num 5, デフォルト: Cmd+Num 6, デフォルト: Shift+Num 6, デフォルト: Shift+Cmd+Num 6, デフォルト: Opt+Num 6, デフォルト: Opt+Cmd+Num 6, デフォルト: Opt+Shift+Num 6, デフォルト: Opt+Shift+Cmd+Num 6, デフォルト: Cmd+Num 7, デフォルト: Shift+Num 7, デフォルト: Shift+Cmd+Num 7, デフォルト: Opt+Num 7, デフォルト: Opt+Cmd+Num 7, デフォルト: Opt+Shift+Num 7, デフォルト: Opt+Shift+Cmd+Num 7, デフォルト: Cmd+Num 8, デフォルト: Shift+Num 8, デフォルト: Shift+Cmd+Num 8, デフォルト: Opt+Num 8, デフォルト: Opt+Cmd+Num 8, デフォルト: Opt+Shift+Num 8, デフォルト: Opt+Shift+Cmd+Num 8, デフォルト: Cmd+Num 9, デフォルト: Shift+Num 9, デフォルト: Shift+Cmd+Num 9, デフォルト: Opt+Num 9, デフォルト: Opt+Cmd+Num 9, デフォルト: Opt+Shift+Num 9, デフォルト: Opt+Shift+Cmd+Num 9","defined":true,"actionId":119628,"actionIdExpression":"0x1d300 + 76","internalName":"KBSCE Text and Tables:Apply text style","aliases":["テキストスタイルの適用","KBSCE Text and Tables:Apply text style"],"executable":true,"source":"GYAHTEI.indk/runtime","id":2013}];
 
 (function () {
-    var SS_VERSION = "1.0.5";
+    var SS_VERSION = "1.0.10";
     var MAX_RESULTS = 300;
     var commands = [];
     var selectedCommand = null;
@@ -3127,7 +3186,9 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                     byCommandName[normalize(scriptRecordName)] ||
                     (idKey ? byActionId[idKey] : null);
             } else {
-                command = idKey ? byActionId[idKey] : null;
+                command = (idKey ? byActionId[idKey] : null) ||
+                    (record.internalName ? byInternalName[record.internalName] : null) ||
+                    (record.name ? byCommandName[normalize(record.name)] : null);
             }
             if (!command) {
                 command = {
@@ -3146,6 +3207,10 @@ var SHORTCUT_SEARCH_COMMANDS = [{"name":"InDesign について...","area":"ア�
                 if (idKey) { byActionId[idKey] = command; }
                 if (record.internalName) { byInternalName[record.internalName] = command; }
                 byCommandName[normalize(command.name)] = command;
+            }
+            if (command.actionId === null || command.actionId === undefined) {
+                command.actionId = record.actionId;
+                if (idKey) { byActionId[idKey] = command; }
             }
             if (!command.actionIdExpression) { command.actionIdExpression = record.actionIdExpression; }
             if (!command.internalName) { command.internalName = record.internalName; }
